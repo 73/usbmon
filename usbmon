@@ -1,0 +1,60 @@
+#!/usr/bin/python3
+
+import pyudev
+import sys
+import gi
+gi.require_version('Notify', '0.7')
+from gi.repository import Notify
+
+Notify.init("USBMON")
+notification = Notify.Notification.new("USB DEVICES:")
+notification.set_urgency(0)
+
+def format_device(dev):
+    return '{} {}'.format(
+        dev.get('ID_VENDOR_FROM_DATABASE'),
+        dev.get('ID_MODEL_FROM_DATABASE'))
+
+def drv_list_to_str(drv):
+    if drv:
+        drv = list(set(drv))
+        return '{}'.format(', '.join(drv))
+    else:
+        return '-none-'
+
+try:
+    context = pyudev.Context()
+    monitor = pyudev.Monitor.from_netlink(context)
+    monitor.filter_by(subsystem='usb')
+
+    all_usb_devs = ''
+
+    for device in context.list_devices(subsystem='usb'):
+        if device.device_type == 'usb_device':
+            all_usb_devs += format_device(device) + ': '
+            drv = []
+            for iface in device.children:
+                if iface.device_type == 'usb_interface':
+                    if iface.get('DRIVER'):
+                        drv.append(iface.get('DRIVER'))
+            all_usb_devs += drv_list_to_str(drv) + '\n'
+
+    notification.update('USBMON: Devices active', all_usb_devs)
+    notification.show()
+
+    for device in iter(monitor.poll, None):
+        if device.device_type == 'usb_device' and device.action == 'add':
+            drv = []
+            for iface in device.children:
+                if iface.device_type == 'usb_interface':
+                    drv.append(iface.get('DRIVER'))
+            body =  format_device(device) + '\n' + drv_list_to_str(drv)
+            title = 'USBMON: Device detected'
+            notification.update(title, body)
+            notification.set_urgency(1)
+            if len(drv) > 1:
+                notification.set_urgency(2)
+            notification.show()
+except KeyboardInterrupt:
+        notification.close()
+        sys.exit()
